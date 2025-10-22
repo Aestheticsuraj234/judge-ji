@@ -14,7 +14,69 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Test {
-  id String @id @default(cuid())
-  name String
+model Submission{
+  // Core attribution
+  id String @id @default(cuid()) 
+  token String? @unique
+
+  // Code and Configuration 
+  source_code Json?
+  language_id  String
+  compiler_options Json?  
+  command_line_arguments String?
+  stdin    String?
+  expected_output String?
+  additional_files Bytes?
+  callback_url String?
+
+  // Configuration variables
+  stdout  String?
+  stderr  String?
+  compile_output String?
+  message String?
+  exit_code Int?
+  exit_signal Int?
+  status_id  Int?
+  time  Float?
+  wall_time Float?
+  memory  Int?
+
+  // Timestamps and host info ( attributes related to processing flow)
+  created_at  DateTime?  
+  finished_at DateTime?
+  started_at DateTime?
+  queued_at DateTime?
+  updated_at DateTime?
+  queue_host  String?
+  execution_host String?
+
+  // Relations  
+  language  Language @relation(fields: [language_id], references: [id])
+  status    Status? @relation(fields: [status_id], references: [id])
+
+  @@map("submissions")
+  @@index([token])
+}
+
+model Language {
+  id  String @id @default(cuid())
+  name String?
+  compile_cmd String?
+  run_cmd String?
+  source_file String?
+  is_archived Boolean
+
+  Submissions Submission[]
+
+  @@map("languages")
+}
+
+// Status table (lookup/enumeration table , required for foreign key status_id)
+
+model Status {
+  id   Int @id @default(autoincrement())
+  name String?
+
+  Submissions Submission[]
+  @@map("statuses")
 }
