@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "es2016",
     "module": "commonjs",
+    "moduleResolution": "node",  // Add this line
     "outDir": "./dist",
     "rootDir": "./src",
     "strict": true,

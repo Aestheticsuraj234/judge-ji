@@ -21,7 +21,7 @@ model Submission{
 
   // Code and Configuration 
   source_code Json?
-  language_id  String
+  language_id  Int
   compiler_options Json?  
   command_line_arguments String?
   stdin    String?
@@ -59,7 +59,7 @@ model Submission{
 }
 
 model Language {
-  id  String @id @default(cuid())
+  id  Int @id 
   name String?
   compile_cmd String?
   run_cmd String?
