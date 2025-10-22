@@ -64,7 +64,7 @@ model Language {
   compile_cmd String?
   run_cmd String?
   source_file String?
-  is_archived Boolean
+  is_archived Boolean @default(false)
 
   Submissions Submission[]
 
