@@ -7,7 +7,7 @@ export const createSubmissionSchema = z.object({
     stdin: z.string().optional(),
     expected_output: z.string().optional(),
     compile_output: z.string().optional(),
-    command_line_arguments: z.string().optional(),
+    command_line_arguments: z.string().max(512).optional(),
     callback_url: z.url().optional(),
     cpu_time_limit: z.number().positive().max(15).optional(),
     cpu_extra_time: z.number().positive().max(2).optional(),
@@ -25,3 +25,5 @@ export const createSubmissionSchema = z.object({
     additional_files: z.string().optional() 
   })
 });
+
+export type CreateSubmissionBody = z.infer<typeof createSubmissionSchema>['body'];

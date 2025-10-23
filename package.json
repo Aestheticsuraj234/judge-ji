@@ -4,12 +4,12 @@
   "description": "",
   "main": "dist/server.js",
   "scripts": {
-    "dev": "docker-compose up -d && ts-node-dev --respawn --transpile-only src/server.ts",
+    "dev": "docker-compose up -d && sleep 2 && ts-node-dev --respawn --transpile-only src/server.ts",
     "build": "tsc",
     "start": "node dist/server.js",
     "db:push": "npx prisma db push",
     "generate": "npx prisma generate",
-     "seed:languages": "ts-node src/scripts/language.seed.ts"
+    "seed:languages": "ts-node src/scripts/language.seed.ts"
   },
   "keywords": [],
   "author": "",

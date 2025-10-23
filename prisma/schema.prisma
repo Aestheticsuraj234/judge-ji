@@ -78,5 +78,7 @@ model Status {
   name String?
 
   Submissions Submission[]
+
+  @@unique([name])
   @@map("statuses")
 }

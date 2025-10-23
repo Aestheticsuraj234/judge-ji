@@ -45,12 +45,13 @@ async function ensureStatuses() {
   ];
 
   for (const name of statusNames) {
-    const existing = await prisma.status.findFirst({ where: { name } });
-    if (!existing) {
-      await prisma.status.create({ data: { name } });
-    }
+    await prisma.status.upsert({
+     where: { name },
+      update: {},
+     create: { name }
+    });
   }
 }
 
-// Run without awaiting to avoid blocking startup, but log errors
+
 ensureStatuses().catch(err => console.error('Failed to ensure statuses:', err));

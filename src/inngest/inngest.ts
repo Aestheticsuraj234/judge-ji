@@ -1,3 +1,4 @@
+import { isAllowedWebhookUrl } from "@/lib/utils";
 import prisma from "../lib/db";
 import { DockerRunner } from "../services/dockerRunner.service";
 import { Inngest } from "inngest";
@@ -25,24 +26,24 @@ export const processSubmission = inngest.createFunction(
       });
     });
 
-    const languageId = submission?.language_id as number;
-    const cpuTimeLimit = 2;
-    const memoryLimit = Math.floor(
-      ((submission?.memory as number) || 128000) / 1024
-    );
-    const wallTimeLimit = submission?.wall_time as number;
+    const languageId = submission.language_id as number;
+    const {
+      cpuTimeLimit = 2,
+      memoryLimit = 256,      // MB
+      wallTimeLimit = 20      // seconds
+    } = (event.data as any) || {};
 
     await step.run("update-status-processing", async () => {
+      const processing = await prisma.status.findFirst({
+        where: { name: "Processing" },
+      });
       await prisma.submission.update({
         where: { id: submissionId },
-        data: {
-          status_id: 2,
-          started_at: new Date(),
-        },
+        data: { status_id: processing?.id ?? 2, started_at: new Date() },
       });
     });
 
-    const result = await step.run("execute-in-docker" , async()=>{
+    const result = await step.run("execute-in-docker", async () => {
       return await DockerRunner.run(
         submission?.source_code?.toString() || "",
         languageId,
@@ -52,21 +53,28 @@ export const processSubmission = inngest.createFunction(
           memoryLimit,
           wallTimeLimit,
         }
-      )
-    })
+      );
+    });
 
     let status_id = 3;
-     if (result.exitCode !== 0) {
-      status_id = result.stderr.includes('timeout') ? 5 : 6; // TLE or Compile Error
-    } else if (submission.expected_output && result.stdout !== submission.expected_output) {
+    if (result.exitCode !== 0) {
+      const isTimeout =
+        /timeout/i.test(result.stderr || "") ||
+        /timeout/i.test(result.error || "");
+      status_id = isTimeout ? 5 : 6; // TLE or Compile Error
+    } else if (
+      submission.expected_output &&
+      result.stdout.trim().replace(/\r\n/g, "\n") !==
+        submission.expected_output.trim().replace(/\r\n/g, "\n")
+    ) {
       status_id = 4; // Wrong Answer
     }
 
-    await step.run("save-results" , async()=>{
+    await step.run("save-results", async () => {
       await prisma.submission.update({
-        where:{id:submissionId},
-        data:{
-                stdout: result.stdout,
+        where: { id: submissionId },
+        data: {
+          stdout: result.stdout,
           stderr: result.stderr,
           time: result.time,
           memory: result.memory,
@@ -74,16 +82,20 @@ export const processSubmission = inngest.createFunction(
           status_id,
           message: result.error || null,
           finished_at: new Date(),
-        }
-      })
-    })
+        },
+      });
+    });
 
-      if (submission.callback_url) {
-      await step.run('send-webhook', async () => {
+    if (submission.callback_url) {
+      await step.run("send-webhook", async () => {
         try {
+          const url = new URL(submission?.callback_url!);
+          if(!isAllowedWebhookUrl(url)){
+            throw new Error("Webhook URL targets disallowed destination");
+          }
           await fetch(submission.callback_url!, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+            method: "PUT",
+            headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               token: submission.token,
               stdout: result.stdout,
@@ -94,7 +106,7 @@ export const processSubmission = inngest.createFunction(
             }),
           });
         } catch (err) {
-          console.error('Webhook failed:', err);
+          console.error("Webhook failed:", err);
         }
       });
     }

@@ -1,8 +1,10 @@
-// src/services/dockerRunner.service.ts
+
 import Docker from 'dockerode';
 import { randomBytes } from 'crypto';
+import { PrismaClient } from '@prisma/client';
 
 const docker = new Docker();
+const prisma = new PrismaClient();
 
 interface ExecutionResult {
   stdout: string;
@@ -24,7 +26,7 @@ export class DockerRunner {
       wallTimeLimit: number;
     }
   ): Promise<ExecutionResult> {
-    // Map language_id to Docker image and commands
+    // Get language configuration from database
     const languageConfig = await this.getLanguageConfig(languageId);
     if (!languageConfig) {
       return { stdout: '', stderr: 'Language not supported', time: 0, memory: 0, exitCode: 1 };
@@ -43,9 +45,10 @@ export class DockerRunner {
 
     const startTime = Date.now();
 
+    let container: Docker.Container | null = null;
     try {
       // Create container
-      const container = await docker.createContainer({
+      container = await docker.createContainer({
         Image: image,
         name: containerName,
         AttachStdin: true,
@@ -56,14 +59,14 @@ export class DockerRunner {
         StdinOnce: true,
         HostConfig: {
           Memory: config.memoryLimit * 1024 * 1024, // Convert MB to bytes
-          CpuQuota: config.cpuTimeLimit * 100000, // 1s = 100000us
+          CpuQuota: Math.floor(0.5 * 100000), // example: 0.5 CPU
           NetworkMode: 'none', // Disable network unless enabled
         },
       });
 
       // Write source code
       await container.putArchive(
-        this.createTarArchive({ [fileName]: sourceCode }),
+        this.createTarArchive({ [fileName as string]: sourceCode }),
         { path: '/' }
       );
 
@@ -92,7 +95,7 @@ export class DockerRunner {
 
       // Run program
       const runExec = await container.exec({
-        Cmd: runCmd.split(' '),
+        Cmd: runCmd?.split(' '),
         AttachStdout: true,
         AttachStderr: true,
       });
@@ -116,6 +119,10 @@ export class DockerRunner {
     } catch (err: any) {
       stderr = `Execution error: ${err.message}`;
       execTime = Date.now() - startTime;
+    } finally {
+      if (container) {
+        try { await container.remove({ force: true }); } catch {}
+      }
     }
 
     return {
@@ -222,37 +229,126 @@ export class DockerRunner {
   }
 
   private static async getLanguageConfig(languageId: number) {
-    const configs: Record<number, {
-      image: string;
-      compileCmd?: string;
-      runCmd: string;
-      fileName: string;
-      compileFirst: boolean;
-    }> = {
-      71: { // Python 3.8
-        image: 'python:3.8-slim',
-        runCmd: 'python3 main.py',
-        fileName: 'main.py',
-        compileFirst: false,
-      },
-      4: { // C (gcc 7.2.0)
-        image: 'gcc:7.2.0',
-        compileCmd: 'gcc -o a.out main.c',
-        runCmd: './a.out',
-        fileName: 'main.c',
-        compileFirst: true,
-      },
-      73: { // Rust
-        image: 'rust:1.40',
-        compileCmd: 'rustc main.rs',
-        runCmd: './main',
-        fileName: 'main.rs',
-        compileFirst: true,
-      },
-  
-      
-    };
+    try {
+      // Fetch language from database
+      const language = await prisma.language.findUnique({
+        where: { id: languageId, is_archived: false },
+      });
 
-    return configs[languageId];
+      if (!language) {
+        return null;
+      }
+
+      // Map language to Docker image and configuration
+      const imageMap: Record<string, string> = {
+        // Assembly
+        'Assembly (NASM 2.14.02)': 'nasm:2.14.02',
+        
+        // Bash
+        'Bash (5.0.0)': 'bash:5.0',
+        'Bash (4.4)': 'bash:4.4',
+        
+        // Basic
+        'Basic (FBC 1.07.1)': 'freebasic:1.07.1',
+        
+        // C
+        'C (GCC 7.4.0)': 'gcc:7.4.0',
+        'C (GCC 8.3.0)': 'gcc:8.3.0',
+        'C (GCC 9.2.0)': 'gcc:9.2.0',
+        'C (gcc 7.2.0)': 'gcc:7.2.0',
+        'C (gcc 6.4.0)': 'gcc:6.4.0',
+        'C (gcc 5.4.0)': 'gcc:5.4.0',
+        'C (gcc 4.9.4)': 'gcc:4.9.4',
+        'C (gcc 4.8.5)': 'gcc:4.8.5',
+        
+        // C#
+        'C# (Mono 6.6.0.161)': 'mono:6.6.0.161',
+        
+        // C++
+        'C++ (GCC 7.4.0)': 'gcc:7.4.0',
+        'C++ (GCC 8.3.0)': 'gcc:8.3.0',
+        'C++ (GCC 9.2.0)': 'gcc:9.2.0',
+        'C++ (g++ 7.2.0)': 'gcc:7.2.0',
+        'C++ (g++ 6.4.0)': 'gcc:6.4.0',
+        'C++ (g++ 6.3.0)': 'gcc:6.3.0',
+        'C++ (g++ 5.4.0)': 'gcc:5.4.0',
+        'C++ (g++ 4.9.4)': 'gcc:4.9.4',
+        'C++ (g++ 4.8.5)': 'gcc:4.8.5',
+        
+        // Common Lisp
+        'Common Lisp (SBCL 2.0.0)': 'clfoundation/sbcl:2.0.0',
+        
+        // D
+        'D (DMD 2.089.1)': 'dlang:2.089.1',
+        
+        // Elixir
+        'Elixir (1.9.4)': 'elixir:1.9.4',
+        
+        // Erlang
+        'Erlang (OTP 22.2)': 'erlang:22.2',
+        
+        // Fortran
+        'Fortran (GFortran 9.2.0)': 'gcc:9.2.0',
+        
+        // Go
+        'Go (1.13.5)': 'golang:1.13.5',
+        
+        // Haskell
+        'Haskell (GHC 8.8.1)': 'haskell:8.8.1',
+        
+        // Java
+        'Java (OpenJDK 13.0.1)': 'openjdk:13.0.1',
+        
+        // JavaScript
+        'JavaScript (Node.js 12.14.0)': 'node:12.14.0',
+        
+        // Lua
+        'Lua (5.3.5)': 'lua:5.3.5',
+        
+        // OCaml
+        'OCaml (4.09.0)': 'ocaml:4.09.0',
+        
+        // Octave
+        'Octave (5.1.0)': 'gnuoctave/octave:5.1.0',
+        
+        // Pascal
+        'Pascal (FPC 3.0.4)': 'freepascal:3.0.4',
+        
+        // PHP
+        'PHP (7.4.1)': 'php:7.4.1',
+        
+        // Prolog
+        'Prolog (GNU Prolog 1.4.5)': 'gprolog:1.4.5',
+        
+        // Python
+        'Python (2.7.17)': 'python:2.7.17',
+        'Python (3.8.1)': 'python:3.8.1',
+        
+        // Ruby
+        'Ruby (2.7.0)': 'ruby:2.7.0',
+        
+        // Rust
+        'Rust (1.40.0)': 'rust:1.40.0',
+        
+        // TypeScript
+        'TypeScript (3.7.4)': 'node:12.14.0',
+      };
+
+      const image = imageMap[language?.name!];
+      if (!image) {
+        return null;
+      }
+
+      return {
+        image,
+        compileCmd: language.compile_cmd || undefined,
+        runCmd: language.run_cmd,
+        fileName: language.source_file,
+        compileFirst: !!language.compile_cmd,
+      };
+    } catch (error) {
+      console.error('Error fetching language config:', error);
+      return null;
+    }
   }
 }
